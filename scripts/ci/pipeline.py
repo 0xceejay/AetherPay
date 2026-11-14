@@ -206,6 +206,38 @@ def assert_main(api, repo_root):
     return current
 
 
+def select_plan(api, commit):
+    """Find the pull request merged by a push to main and its newest successful plan run."""
+    require(re.fullmatch(r"[0-9a-f]{40}", commit), "Invalid commit identifier.")
+    merged = [
+        pr for pr in api.get(f"commits/{commit}/pulls")
+        if pr.get("merged") and pr.get("base", {}).get("ref") == "main" and pr.get("merge_commit_sha") == commit
+    ]
+    require(len(merged) == 1, "This push to main is not the merge of exactly one pull request, so no apply was authorized. Dispatch the apply workflow manually if you intend one.")
+    pr = merged[0]
+    identity = repository_id()
+    require(pr.get("head", {}).get("repo", {}).get("id") == identity, "Cloud CI does not execute fork pull requests.")
+    head = pr["head"]["sha"]
+    runs = api.pages(f"actions/workflows/{Path(WORKFLOW).name}/runs?event=pull_request&head_sha={head}&status=success", "workflow_runs")
+    runs = [
+        run for run in runs
+        if run.get("conclusion") == "success" and run.get("head_sha") == head
+        and run.get("repository", {}).get("id") == identity and run.get("head_repository", {}).get("id") == identity
+    ]
+    require(runs, "No successful plan run exists for the final commit of this pull request. Run the plan, then dispatch the apply workflow manually.")
+    run = max(runs, key=lambda item: item["run_started_at"])
+    return positive(pr["number"]), positive(run["id"]), positive(run["run_attempt"])
+
+
+def resolve_apply(args):
+    require(env("GITHUB_EVENT_NAME") == "push" and env("GITHUB_REF") == "refs/heads/main", "Automatic apply selection runs only for a push to main.")
+    number, run_id, attempt = select_plan(GitHub(), env("GITHUB_SHA"))
+    output("pr_number", number)
+    output("plan_run_id", run_id)
+    output("plan_run_attempt", attempt)
+    print(f"Selected PR {number} and plan run {run_id} attempt {attempt}; the signed plan is verified before any apply.")
+
+
 def check_main(args):
     repository_id()
     clean_checkout(args.repo_root)
@@ -558,10 +590,10 @@ def alert_drift(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
-    for name, function in [("config", configure), ("prepare-plan", prepare_plan), ("make-artifact", make_artifact), ("verify-apply", verify_apply), ("check-main", check_main), ("comment-plan", comment_plan), ("alert-drift", alert_drift)]:
+    for name, function in [("config", configure), ("prepare-plan", prepare_plan), ("make-artifact", make_artifact), ("verify-apply", verify_apply), ("check-main", check_main), ("resolve-apply", resolve_apply), ("comment-plan", comment_plan), ("alert-drift", alert_drift)]:
         child = sub.add_parser(name)
         child.set_defaults(function=function)
-        if name not in {"alert-drift", "check-main"}:
+        if name not in {"alert-drift", "check-main", "resolve-apply"}:
             child.add_argument("--work-dir", type=Path, required=True)
         if name in {"prepare-plan", "make-artifact", "verify-apply", "check-main"}:
             child.add_argument("--repo-root", type=Path, required=True)

@@ -1,6 +1,10 @@
-name: Apply a selected signed Terraform plan
+name: Apply the signed Terraform plan
 
 on:
+  # A merge to main applies the plan that was signed for that pull request. The manual
+  # dispatch stays for re-applying, regenerated plans, and pushes that need a hand-picked run.
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       pr_number:
@@ -53,11 +57,8 @@ jobs:
       TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
       STAGING_TFVARS_JSON: ${{ vars.STAGING_TFVARS_JSON }}
       PLAN_SIGNING_KEY_ARN: ${{ vars.PLAN_SIGNING_KEY_ARN }}
-      PR_NUMBER: ${{ inputs.pr_number }}
-      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
-      PLAN_RUN_ATTEMPT: ${{ inputs.plan_run_attempt }}
     steps:
-      - name: Check out the main commit selected by this dispatch
+      - name: Check out the main commit selected by this run
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: source
@@ -74,6 +75,10 @@ jobs:
         with:
           terraform_version: 1.17.1
           terraform_wrapper: false
+      - name: Find the merged pull request and its signed plan run
+        id: target
+        if: github.event_name == 'push'
+        run: python3 scripts/ci/pipeline.py resolve-apply
       - name: Assume the apply and signature-verification role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
@@ -83,6 +88,10 @@ jobs:
           allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
           unset-current-credentials: true
       - name: Verify maintainer, merged PR, source, age, and signatures
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr_number || inputs.pr_number }}
+          PLAN_RUN_ID: ${{ steps.target.outputs.plan_run_id || inputs.plan_run_id }}
+          PLAN_RUN_ATTEMPT: ${{ steps.target.outputs.plan_run_attempt || inputs.plan_run_attempt }}
         run: |
           python3 scripts/ci/pipeline.py verify-apply --pr "$PR_NUMBER" \
             --run-id "$PLAN_RUN_ID" --run-attempt "$PLAN_RUN_ATTEMPT" \
