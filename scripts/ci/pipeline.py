@@ -209,14 +209,15 @@ def assert_main(api, repo_root):
 def select_plan(api, commit):
     """Find the pull request merged by a push to main and its newest successful plan run."""
     require(re.fullmatch(r"[0-9a-f]{40}", commit), "Invalid commit identifier.")
-    merged = [
+    # This endpoint returns summary objects with merged_at but no merged flag, so match on the
+    # merge commit here and read the full pull request afterwards.
+    candidates = [
         pr for pr in api.get(f"commits/{commit}/pulls")
-        if pr.get("merged") and pr.get("base", {}).get("ref") == "main" and pr.get("merge_commit_sha") == commit
+        if pr.get("merged_at") and pr.get("base", {}).get("ref") == "main" and pr.get("merge_commit_sha") == commit
     ]
-    require(len(merged) == 1, "This push to main is not the merge of exactly one pull request, so no apply was authorized. Dispatch the apply workflow manually if you intend one.")
-    pr = merged[0]
+    require(len(candidates) == 1, "This push to main is not the merge of exactly one pull request, so no apply was authorized. Dispatch the apply workflow manually if you intend one.")
+    pr = check_pr(api, candidates[0]["number"], True)
     identity = repository_id()
-    require(pr.get("head", {}).get("repo", {}).get("id") == identity, "Cloud CI does not execute fork pull requests.")
     head = pr["head"]["sha"]
     runs = api.pages(f"actions/workflows/{Path(WORKFLOW).name}/runs?event=pull_request&head_sha={head}&status=success", "workflow_runs")
     runs = [
