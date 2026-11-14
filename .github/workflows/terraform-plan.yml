@@ -1,0 +1,198 @@
+name: Terraform checks and signed plan
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged PR to associate with a fresh plan of current main
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_EC2_METADATA_DISABLED: 'true'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  checks:
+    name: Formatting, validation, lint, and security
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    steps:
+      - name: Check out proposed merge or current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13.9'
+          architecture: x64
+          pip-version: '24.3.1'
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform
+      - name: Build the pinned rotation package
+        run: python3 terraform/modules/security/rotation/build_package.py
+      - name: Validate every Terraform root and module
+        run: |
+          for directory in terraform/environments/staging/bootstrap terraform/environments/staging terraform/modules/*; do
+            terraform -chdir="$directory" init -backend=false -input=false -no-color
+            terraform -chdir="$directory" validate -no-color
+          done
+      - name: Install TFLint
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.64.0
+          cache: false
+      - name: Initialize the pinned AWS lint plugin
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: tflint --init --config "$PWD/.tflint.hcl"
+      - name: Lint Terraform recursively
+        run: |
+          tflint --recursive --config "$PWD/.tflint.hcl" --format compact \
+            --minimum-failure-severity=warning
+      - name: Report all configuration findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          scan-type: config
+          scan-ref: ${{ github.workspace }}/source/terraform
+          skip-dirs: ${{ github.workspace }}/source/terraform/modules/security/.build
+          format: table
+          output: ${{ runner.temp }}/trivy-config.txt
+          severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+          exit-code: '0'
+          cache: false
+      - name: Show findings and block critical misconfigurations
+        run: |
+          cat "$RUNNER_TEMP/trivy-config.txt"
+          trivy config --severity CRITICAL --exit-code 1 \
+            --skip-dirs terraform/modules/security/.build terraform
+      - name: Retain the security report for one day
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: terraform-security-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/trivy-config.txt
+          retention-days: 1
+          if-no-files-found: ignore
+
+  plan:
+    name: Plan staging and sign the reviewed artifact
+    needs: checks
+    if: >-
+      github.repository == '0xceejay/AetherPay' &&
+      ((github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository) ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pull-requests: write
+    concurrency:
+      group: terraform-staging
+      queue: max
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      STAGING_TFVARS_JSON: ${{ vars.STAGING_TFVARS_JSON }}
+      PLAN_SIGNING_KEY_ARN: ${{ vars.PLAN_SIGNING_KEY_ARN }}
+      PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+    steps:
+      - name: Check out proposed merge or current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13.9'
+          architecture: x64
+          pip-version: '24.3.1'
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Validate backend and non-secret configuration
+        run: python3 scripts/ci/pipeline.py config --work-dir "$RUNNER_TEMP/aetherpay"
+      - name: Verify the source and PR context
+        id: context
+        run: |
+          python3 scripts/ci/pipeline.py prepare-plan --pr "$PR_NUMBER" \
+            --repo-root "$GITHUB_WORKSPACE/source" --work-dir "$RUNNER_TEMP/aetherpay"
+      - name: Build the pinned rotation package
+        run: python3 terraform/modules/security/rotation/build_package.py
+      - name: Assume the read-only plan and signing role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          role-session-name: aetherpay-plan-${{ github.run_id }}
+          aws-region: us-east-1
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          unset-current-credentials: true
+      - name: Initialize the staging backend
+        run: |
+          terraform -chdir=terraform/environments/staging init -input=false -no-color \
+            -lockfile=readonly -backend-config="$RUNNER_TEMP/aetherpay/backend.json"
+      - name: Create the binary plan without publishing raw values
+        run: |
+          set +e
+          terraform -chdir=terraform/environments/staging plan -input=false -no-color \
+            -lock-timeout=5m -detailed-exitcode \
+            -var-file="$RUNNER_TEMP/aetherpay/staging.tfvars.json" \
+            -out="$RUNNER_TEMP/aetherpay/plan.tfplan" \
+            > "$RUNNER_TEMP/aetherpay/plan.log" 2>&1
+          result=$?
+          set -e
+          if [[ "$result" != 0 && "$result" != 2 ]]; then
+            echo '::error::Terraform planning failed. Raw output was kept private on this runner.'
+            exit 1
+          fi
+      - name: Sign the plan and provenance manifest
+        id: artifact
+        run: |
+          python3 scripts/ci/pipeline.py make-artifact \
+            --repo-root "$GITHUB_WORKSPACE/source" --work-dir "$RUNNER_TEMP/aetherpay"
+      - name: Upload the signed artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.artifact.outputs.artifact_name }}
+          path: ${{ runner.temp }}/aetherpay/artifact/
+          retention-days: 1
+          if-no-files-found: error
+          overwrite: false
+      - name: Comment the plan output and artifact provenance
+        run: python3 scripts/ci/pipeline.py comment-plan --work-dir "$RUNNER_TEMP/aetherpay"

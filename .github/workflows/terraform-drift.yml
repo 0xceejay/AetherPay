@@ -1,0 +1,94 @@
+name: Detect staging Terraform drift
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # 07:17 WAT
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_EC2_METADATA_DISABLED: 'true'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  drift:
+    name: Inspect staging and alert without applying
+    if: github.repository == '0xceejay/AetherPay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: terraform-staging
+      queue: max
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      STAGING_TFVARS_JSON: ${{ vars.STAGING_TFVARS_JSON }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13.9'
+          architecture: x64
+          pip-version: '24.3.1'
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Validate backend and non-secret configuration
+        run: python3 scripts/ci/pipeline.py config --work-dir "$RUNNER_TEMP/aetherpay"
+      - name: Build the pinned rotation package
+        run: python3 terraform/modules/security/rotation/build_package.py
+      - name: Assume the separate drift role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_DRIFT_ROLE_ARN }}
+          role-session-name: aetherpay-drift-${{ github.run_id }}
+          aws-region: us-east-1
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          unset-current-credentials: true
+      - name: Initialize the staging backend
+        run: |
+          terraform -chdir=terraform/environments/staging init -input=false -no-color \
+            -lockfile=readonly -backend-config="$RUNNER_TEMP/aetherpay/backend.json"
+      - name: Detect drift and preserve Terraform's exit code
+        id: drift
+        run: |
+          set +e
+          terraform -chdir=terraform/environments/staging plan -input=false -no-color \
+            -lock-timeout=5m -detailed-exitcode \
+            -var-file="$RUNNER_TEMP/aetherpay/staging.tfvars.json" \
+            > "$RUNNER_TEMP/aetherpay/drift.log" 2>&1
+          result=$?
+          set -e
+          if [[ "$result" != 0 && "$result" != 2 ]]; then
+            result=1
+          fi
+          printf 'exit_code=%s\n' "$result" >> "$GITHUB_OUTPUT"
+      - name: Record clean state or send a redacted Slack alert
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.drift.outputs.exit_code || '1' }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python3 scripts/ci/pipeline.py alert-drift --exit-code "$EXIT_CODE"

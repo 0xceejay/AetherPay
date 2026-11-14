@@ -13,6 +13,9 @@
 # Local plans, backend configs, and the seed virtualenv from the launch steps
 .aetherpay/
 
+# Bootstrap's backend.tf is copied from backend.tf.example after the first apply, so a fresh clone can start with local state
+terraform/environments/staging/bootstrap/backend.tf
+
 # Terraform working directories, state, local state locks, plans, and real inputs
 .terraform/
 *.tfstate

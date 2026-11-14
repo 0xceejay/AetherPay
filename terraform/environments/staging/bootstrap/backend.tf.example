@@ -1,0 +1,4 @@
+# Added as backend.tf after the bucket has been created with local bootstrap state.
+terraform {
+  backend "s3" {}
+}
