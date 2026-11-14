@@ -1,0 +1,36 @@
+.vscode/
+
+# Local AI assistant instructions and configuration
+/AGENTS.md
+/CLAUDE.md
+/.cursor/
+
+# Local credentials and private key material
+.aws/
+.env
+.env.*
+
+# Local plans, backend configs, and the seed virtualenv from the launch steps
+.aetherpay/
+
+# Terraform working directories, state, local state locks, plans, and real inputs
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+*.tfplan
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Generated Lambda package and downloaded dependencies
+terraform/modules/security/.build/
+
+# Python helper bytecode
+__pycache__/
+*.py[cod]
