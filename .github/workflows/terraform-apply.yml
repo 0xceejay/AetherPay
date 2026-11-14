@@ -1,0 +1,98 @@
+name: Apply a selected signed Terraform plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged pull request number
+        required: true
+        type: string
+      plan_run_id:
+        description: Successful Terraform plan workflow run ID
+        required: true
+        type: string
+      plan_run_attempt:
+        description: Attempt number within the selected plan run
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: 'true'
+  TF_INPUT: 'false'
+  AWS_REGION: us-east-1
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_EC2_METADATA_DISABLED: 'true'
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  apply:
+    name: Verify and apply the selected staging plan
+    if: github.repository == '0xceejay/AetherPay' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+      pull-requests: read
+    concurrency:
+      group: terraform-staging
+      queue: max
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: source
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      STAGING_TFVARS_JSON: ${{ vars.STAGING_TFVARS_JSON }}
+      PLAN_SIGNING_KEY_ARN: ${{ vars.PLAN_SIGNING_KEY_ARN }}
+      PR_NUMBER: ${{ inputs.pr_number }}
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      PLAN_RUN_ATTEMPT: ${{ inputs.plan_run_attempt }}
+    steps:
+      - name: Check out the main commit selected by this dispatch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13.9'
+          architecture: x64
+          pip-version: '24.3.1'
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: 1.17.1
+          terraform_wrapper: false
+      - name: Assume the apply and signature-verification role
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-session-name: aetherpay-apply-${{ github.run_id }}
+          aws-region: us-east-1
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          unset-current-credentials: true
+      - name: Verify maintainer, merged PR, source, age, and signatures
+        run: |
+          python3 scripts/ci/pipeline.py verify-apply --pr "$PR_NUMBER" \
+            --run-id "$PLAN_RUN_ID" --run-attempt "$PLAN_RUN_ATTEMPT" \
+            --repo-root "$GITHUB_WORKSPACE/source" --work-dir "$RUNNER_TEMP/aetherpay"
+      - name: Initialize using the verified backend and provider lock
+        run: |
+          terraform -chdir=terraform/environments/staging init -input=false -no-color \
+            -lockfile=readonly -backend-config="$RUNNER_TEMP/aetherpay/backend.json"
+      - name: Apply the verified binary plan
+        run: |
+          python3 scripts/ci/pipeline.py check-main --repo-root "$GITHUB_WORKSPACE/source"
+          terraform -chdir=terraform/environments/staging apply -input=false \
+            -lock-timeout=5m "$RUNNER_TEMP/aetherpay/plan.tfplan"

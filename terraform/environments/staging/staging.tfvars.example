@@ -1,0 +1,55 @@
+# Example identifiers only. Replace them with resources in this AWS project.
+# Keep passwords and signing keys out of this file.
+project_name       = "aetherpay"
+availability_zones = ["us-east-1a", "us-east-1b", "us-east-1c"]
+application_port   = 8080
+health_check_path  = "/health"
+certificate_arn    = "arn:aws:acm:us-east-1:496759721437:certificate/1813f7f4-bd6e-4d21-acb6-85a2d2099b4d"
+
+database = {
+  host = "replace-with-real-postgresql-endpoint"
+  port = 5432
+  name = "aetherpay"
+}
+
+ecr_repository_arn = "arn:aws:ecr:us-east-1:123456789012:repository/aetherpay-ingestor"
+image_uri          = "123456789012.dkr.ecr.us-east-1.amazonaws.com/aetherpay-ingestor:release-1"
+task_cpu           = 512
+task_memory        = 1024
+capacity           = { min = 2, max = 6 }
+# Test only: one task is enough, for example capacity = { min = 1, max = 3 }
+
+cache = {
+  cluster_id           = "aetherpay-cache"
+  subnet_group_name    = "redis-subnets"
+  node_type            = "cache.t3.micro"
+  engine_version       = "7.1"
+  parameter_group_name = "default.redis7"
+  port                 = 6379
+}
+
+# Test only: run without Redis. Leave it out for a real deploy; the application needs the cache.
+# enable_cache = false
+
+queue_visibility_timeout_seconds = 60
+queue_max_receive_count          = 5
+
+# Environment choices; the assessment does not prescribe these thresholds.
+scaling = {
+  cpu_scale_out      = 60
+  cpu_scale_in       = 30
+  memory_scale_out   = 70
+  memory_scale_in    = 35
+  queue_scale_out    = 100
+  queue_scale_in     = 50
+  scale_out_periods  = 1
+  scale_in_periods   = 5
+  scale_out_cooldown = 60
+  scale_in_cooldown  = 300
+}
+
+rotation_days = { database = 30, signature = 30 }
+# False only during the initial secret setup; true for normal operation.
+enable_rotation = true
+
+tags = { Owner = "platform" }
