@@ -1,12 +1,13 @@
 name: Terraform checks and signed plan
 
 on:
-  # The checks run only on a push, and the signed plan runs only on a pull request, so each
-  # event does one job. The plan role trusts only the pull request and main subjects, and
+  # The checks run only on a push to a branch other than main, and the signed plan runs only
+  # on a pull request, so each event does one job. A push to main is the merge, and it runs
+  # the apply workflow instead. The plan role trusts only the pull request and main subjects, and
   # the signed plan is bound to a pull request. Branch protection should require the
   # checks, which run on every push to the pull request's branch.
   push:
-    branches: ['**']
+    branches: ['**', '!main']
   pull_request:
     branches: [main]
   workflow_dispatch:
