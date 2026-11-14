@@ -1,9 +1,10 @@
 name: Terraform checks and signed plan
 
 on:
-  # The checks run on a push to any branch. The cloud plan stays on pull requests, because
-  # the plan role trusts only the pull request and main subjects and the signed plan is
-  # bound to a pull request.
+  # The checks run only on a push, and the signed plan runs only on a pull request, so each
+  # event does one job. The plan role trusts only the pull request and main subjects, and
+  # the signed plan is bound to a pull request. Branch protection should require the
+  # checks, which run on every push to the pull request's branch.
   push:
     branches: ['**']
   pull_request:
@@ -29,7 +30,7 @@ env:
 jobs:
   checks:
     name: Formatting, validation, lint, and security
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -37,7 +38,7 @@ jobs:
         shell: bash
         working-directory: source
     steps:
-      - name: Check out the pushed commit, proposed merge, or current main
+      - name: Check out the pushed commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: source
@@ -104,7 +105,6 @@ jobs:
 
   plan:
     name: Plan staging and sign the reviewed artifact
-    needs: checks
     if: >-
       github.repository == '0xceejay/AetherPay' &&
       ((github.event_name == 'pull_request' &&
