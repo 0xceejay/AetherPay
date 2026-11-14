@@ -1,6 +1,11 @@
 name: Terraform checks and signed plan
 
 on:
+  # The checks run on a push to any branch. The cloud plan stays on pull requests, because
+  # the plan role trusts only the pull request and main subjects and the signed plan is
+  # bound to a pull request.
+  push:
+    branches: ['**']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -24,7 +29,7 @@ env:
 jobs:
   checks:
     name: Formatting, validation, lint, and security
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     defaults:
@@ -32,7 +37,7 @@ jobs:
         shell: bash
         working-directory: source
     steps:
-      - name: Check out proposed merge or current main
+      - name: Check out the pushed commit, proposed merge, or current main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: source
