@@ -37,19 +37,22 @@ variable "github_repository" {
 
 # Numeric IDs that make the default subjects immutable (owner@ID/repo@ID), so a
 # renamed or recreated repository cannot reuse the trust. Look them up with
-# `gh api repos/OWNER/REPO --jq '.owner.id, .id'`.
+# `gh api repos/OWNER/REPO --jq '.owner.id, .id'`. They default to an empty string so
+# tools that read the code without a variable file, such as TFLint, can still evaluate
+# the subject strings. Validation requires real values when the roles are planned.
 variable "github_owner_id" {
   description = "Numeric ID of the GitHub repository owner, used in the immutable OIDC subjects."
   type        = string
-  default     = null
+  default     = ""
+  nullable    = false
 
   validation {
-    condition     = var.github_owner_id == null || can(regex("^[0-9]+$", var.github_owner_id))
+    condition     = var.github_owner_id == "" || can(regex("^[0-9]+$", var.github_owner_id))
     error_message = "The owner ID must be a number."
   }
 
   validation {
-    condition     = var.github_oidc_subjects != null || (var.github_owner_id != null && var.github_repository_id != null)
+    condition     = var.github_oidc_subjects != null || (can(regex("^[0-9]+$", var.github_owner_id)) && can(regex("^[0-9]+$", var.github_repository_id)))
     error_message = "Set github_owner_id and github_repository_id, or set github_oidc_subjects."
   }
 }
@@ -57,10 +60,11 @@ variable "github_owner_id" {
 variable "github_repository_id" {
   description = "Numeric ID of the GitHub repository, used in the immutable OIDC subjects."
   type        = string
-  default     = null
+  default     = ""
+  nullable    = false
 
   validation {
-    condition     = var.github_repository_id == null || can(regex("^[0-9]+$", var.github_repository_id))
+    condition     = var.github_repository_id == "" || can(regex("^[0-9]+$", var.github_repository_id))
     error_message = "The repository ID must be a number."
   }
 }
