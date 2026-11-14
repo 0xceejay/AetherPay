@@ -288,8 +288,18 @@ resource "aws_iam_policy" "refresh" {
       {
         Sid      = "ReadStagingWebAcl"
         Effect   = "Allow"
-        Action   = ["wafv2:GetWebACL", "wafv2:GetWebACLForResource", "wafv2:ListTagsForResource"]
+        Action   = ["wafv2:GetWebACL", "wafv2:ListTagsForResource"]
         Resource = [local.staging_webacl, local.staging_lb]
+      },
+      {
+        # GetWebACLForResource asks which web ACL protects a load balancer, so AWS checks it
+        # against every regional web ACL in this account, not the one named in the request. A
+        # statement scoped to the staging ACL can never match. It is read-only and limited to
+        # this account and Region.
+        Sid      = "FindWebAclForLoadBalancer"
+        Effect   = "Allow"
+        Action   = "wafv2:GetWebACLForResource"
+        Resource = "${local.arn_prefix}:wafv2:${local.regional}:regional/webacl/*/*"
       },
       {
         Sid      = "ReadStagingWorkloadRoles"
@@ -379,7 +389,7 @@ resource "aws_iam_policy" "deploy_network" {
         Effect = "Allow"
         Action = [
           "wafv2:CreateWebACL", "wafv2:UpdateWebACL", "wafv2:DeleteWebACL", "wafv2:GetWebACL",
-          "wafv2:AssociateWebACL", "wafv2:DisassociateWebACL", "wafv2:GetWebACLForResource",
+          "wafv2:AssociateWebACL", "wafv2:DisassociateWebACL",
           "wafv2:ListResourcesForWebACL", "wafv2:TagResource", "wafv2:UntagResource", "wafv2:ListTagsForResource",
         ]
         Resource = [
