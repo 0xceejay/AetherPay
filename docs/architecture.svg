@@ -1,0 +1,143 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 730" width="1280" height="730" role="img" aria-labelledby="ttl dsc">
+<title id="ttl">AetherPay runtime architecture</title>
+<desc id="dsc">Banking partners reach the platform only through a regional WAF and an HTTPS-only load balancer in the public tier. The load balancer forwards to ECS Fargate tasks in the private application tier, which have no public IPs and no internet route. Those tasks reach Redis and PostgreSQL in the isolated tier, which has no internet or NAT route, and reach Secrets Manager, ECR, SQS and S3 only through private VPC endpoints. Rotation Lambdas in the application tier change the database password and the signing key.</desc>
+<style>
+  text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  .bg { fill: #ffffff; }
+  .frame { fill: none; stroke: #8c959f; stroke-width: 1.5; }
+  .vpc { fill: #f6f8fa; stroke: #57606a; stroke-width: 1.5; }
+  .pub { fill: #ddf4ff; }
+  .app { fill: #dafbe1; }
+  .iso { fill: #ffebe9; }
+  .cell { fill: none; stroke: #8c959f; stroke-width: 1; stroke-dasharray: 4 4; }
+  .box { fill: #ffffff; stroke: #57606a; stroke-width: 1.5; }
+  .edge { fill: #ffffff; stroke: #0969da; stroke-width: 2.5; }
+  .group { fill: #ffffff; stroke: #8250df; stroke-width: 1.5; stroke-dasharray: 6 4; }
+  .chip { fill: #fbefff; stroke: #8250df; stroke-width: 1.2; }
+  .svc { fill: #ffffff; stroke: #57606a; stroke-width: 1.5; }
+  .t { font-size: 13px; font-weight: 600; fill: #1f2328; }
+  .s { font-size: 12px; fill: #424a53; }
+  .c { font-size: 11px; fill: #57606a; }
+  .lbl { font-size: 11.5px; font-weight: 600; fill: #1f2328; paint-order: stroke; stroke: #f6f8fa; stroke-width: 4px; stroke-linejoin: round; }
+  .arrow { fill: none; stroke: #424a53; stroke-width: 1.8; }
+  .head { fill: #424a53; }
+  @media (prefers-color-scheme: dark) {
+    .bg { fill: #0d1117; }
+    .frame { stroke: #6e7681; }
+    .vpc { fill: #151b23; stroke: #8b949e; }
+    .pub { fill: #11263f; }
+    .app { fill: #12271a; }
+    .iso { fill: #2c1a1c; }
+    .cell { stroke: #6e7681; }
+    .box { fill: #0d1117; stroke: #8b949e; }
+    .edge { fill: #0d1117; stroke: #58a6ff; }
+    .group { fill: #0d1117; stroke: #a371f7; }
+    .chip { fill: #241636; stroke: #a371f7; }
+    .svc { fill: #0d1117; stroke: #8b949e; }
+    .t { fill: #e6edf3; }
+    .s { fill: #c0c8d0; }
+    .c { fill: #9da7b3; }
+    .lbl { fill: #e6edf3; stroke: #151b23; }
+    .arrow { stroke: #c0c8d0; }
+    .head { fill: #c0c8d0; }
+  }
+</style>
+<defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" class="head"/></marker></defs>
+<rect width="1280" height="730" class="bg"/>
+<rect x="230" y="20" width="1030" height="692" rx="12" class="frame"/>
+<text x="244" y="42" class="t" text-anchor="start">AWS Region us-east-1</text>
+<rect x="250" y="52" width="660" height="638" rx="10" class="vpc"/>
+<text x="264" y="72" class="t" text-anchor="start">VPC 10.24.0.0/20, three AZs</text>
+<rect x="262" y="86" width="636" height="120" rx="8" class="pub"/>
+<text x="278" y="106" class="t" text-anchor="start">Public tier</text>
+<text x="890" y="106" class="c" text-anchor="end">the only tier with an internet route</text>
+<rect x="270" y="112" width="200" height="86" rx="6" class="cell"/>
+<text x="278" y="190" class="c" text-anchor="start">AZ1  10.24.0.0/24</text>
+<rect x="478" y="112" width="200" height="86" rx="6" class="cell"/>
+<text x="486" y="190" class="c" text-anchor="start">AZ2  10.24.1.0/24</text>
+<rect x="686" y="112" width="200" height="86" rx="6" class="cell"/>
+<text x="694" y="190" class="c" text-anchor="start">AZ3  10.24.2.0/24</text>
+<rect x="262" y="226" width="636" height="280" rx="8" class="app"/>
+<text x="278" y="246" class="t" text-anchor="start">Application tier</text>
+<text x="890" y="246" class="c" text-anchor="end">no public IPs, no internet route</text>
+<rect x="270" y="252" width="200" height="246" rx="6" class="cell"/>
+<text x="278" y="490" class="c" text-anchor="start">AZ1  10.24.3.0/24</text>
+<rect x="478" y="252" width="200" height="246" rx="6" class="cell"/>
+<text x="486" y="490" class="c" text-anchor="start">AZ2  10.24.4.0/24</text>
+<rect x="686" y="252" width="200" height="246" rx="6" class="cell"/>
+<text x="694" y="490" class="c" text-anchor="start">AZ3  10.24.5.0/24</text>
+<rect x="262" y="526" width="636" height="144" rx="8" class="iso"/>
+<text x="278" y="546" class="t" text-anchor="start">Isolated tier</text>
+<text x="890" y="546" class="c" text-anchor="end">no internet, no NAT route</text>
+<rect x="270" y="552" width="200" height="110" rx="6" class="cell"/>
+<text x="278" y="654" class="c" text-anchor="start">AZ1  10.24.6.0/24</text>
+<rect x="478" y="552" width="200" height="110" rx="6" class="cell"/>
+<text x="486" y="654" class="c" text-anchor="start">AZ2  10.24.7.0/24</text>
+<rect x="686" y="552" width="200" height="110" rx="6" class="cell"/>
+<text x="694" y="654" class="c" text-anchor="start">AZ3  10.24.8.0/24</text>
+<text x="20" y="104" class="c" text-anchor="start">Outside AWS</text>
+<rect x="20" y="116" width="140" height="60" rx="8" class="box"/>
+<text x="30" y="136" class="t" text-anchor="start">Banking partners</text>
+<text x="30" y="152" class="s" text-anchor="start">signed webhooks</text>
+<polyline points="160,146 276,146" class="arrow" marker-end="url(#head)"/>
+<text x="195" y="138" class="lbl" text-anchor="middle">HTTPS 443</text>
+<rect x="278" y="122" width="604" height="48" rx="8" class="edge"/>
+<text x="288" y="142" class="t" text-anchor="start">Application Load Balancer: HTTPS 443 only, TLS 1.3 policy</text>
+<text x="288" y="158" class="s" text-anchor="start">Regional WAF in front: AWS managed rules + 1,000 requests per 5 min per IP</text>
+<polyline points="640,170 640,272" class="arrow" marker-end="url(#head)"/>
+<text x="648" y="218" class="lbl" text-anchor="start">HTTP 8080</text>
+<rect x="278" y="272" width="168" height="128" rx="8" class="box"/>
+<text x="288" y="292" class="t" text-anchor="start">Rotation Lambdas</text>
+<text x="288" y="308" class="s" text-anchor="start">database password +</text>
+<text x="288" y="326" class="s" text-anchor="start">signing key, 30 days</text>
+<text x="288" y="344" class="s" text-anchor="start">via the same endpoints</text>
+<rect x="456" y="272" width="204" height="128" rx="8" class="box"/>
+<text x="466" y="292" class="t" text-anchor="start">ECS Fargate ingestor</text>
+<text x="466" y="308" class="s" text-anchor="start">3 AZs, 8080, no public IP</text>
+<text x="466" y="326" class="s" text-anchor="start">Scales on CPU, memory and</text>
+<text x="466" y="344" class="s" text-anchor="start">queue depth. Out after 1 min,</text>
+<text x="466" y="362" class="s" text-anchor="start">in after 5 quiet minutes.</text>
+<rect x="712" y="266" width="178" height="210" rx="8" class="group"/>
+<text x="722" y="283" class="t" text-anchor="start">Private endpoints</text>
+<rect x="722" y="292" width="158" height="30" rx="6" class="chip"/>
+<text x="801" y="311" class="s" text-anchor="middle">Secrets Manager</text>
+<rect x="722" y="328" width="158" height="30" rx="6" class="chip"/>
+<text x="801" y="347" class="s" text-anchor="middle">ECR api</text>
+<rect x="722" y="364" width="158" height="30" rx="6" class="chip"/>
+<text x="801" y="383" class="s" text-anchor="middle">ECR dkr</text>
+<rect x="722" y="400" width="158" height="30" rx="6" class="chip"/>
+<text x="801" y="419" class="s" text-anchor="middle">SQS</text>
+<rect x="722" y="436" width="158" height="30" rx="6" class="chip"/>
+<text x="801" y="455" class="s" text-anchor="middle">S3 (gateway endpoint)</text>
+<polyline points="660,336 710,336" class="arrow" marker-end="url(#head)"/>
+<text x="685" y="328" class="lbl" text-anchor="middle">HTTPS</text>
+<text x="940" y="270" class="t" text-anchor="start">AWS services behind the endpoints</text>
+<rect x="940" y="284" width="300" height="46" rx="8" class="svc"/>
+<text x="950" y="303" class="t" text-anchor="start">Secrets Manager</text>
+<text x="950" y="319" class="s" text-anchor="start">CMK-encrypted, reads only via endpoint</text>
+<polyline points="880,307 938,307" class="arrow" marker-end="url(#head)"/>
+<rect x="940" y="338" width="300" height="50" rx="8" class="svc"/>
+<text x="950" y="357" class="t" text-anchor="start">ECR</text>
+<text x="950" y="373" class="s" text-anchor="start">private repository, pinned image tag</text>
+<polyline points="880,343 938,343" class="arrow" marker-end="url(#head)"/>
+<polyline points="880,379 938,379" class="arrow" marker-end="url(#head)"/>
+<rect x="940" y="396" width="300" height="44" rx="8" class="svc"/>
+<text x="950" y="415" class="t" text-anchor="start">SQS ingestion queue</text>
+<text x="950" y="431" class="s" text-anchor="start">dead-letter queue after 5 failed receives</text>
+<polyline points="880,415 938,415" class="arrow" marker-end="url(#head)"/>
+<rect x="940" y="446" width="300" height="30" rx="8" class="svc"/>
+<text x="950" y="465" class="t" text-anchor="start">S3: ECR image layers</text>
+<polyline points="880,451 938,451" class="arrow" marker-end="url(#head)"/>
+<rect x="278" y="568" width="297" height="60" rx="8" class="box"/>
+<text x="288" y="588" class="t" text-anchor="start">PostgreSQL (supplied)</text>
+<text x="288" y="604" class="s" text-anchor="start">port 5432, TLS verified by rotation</text>
+<rect x="585" y="568" width="297" height="60" rx="8" class="box"/>
+<text x="595" y="588" class="t" text-anchor="start">Redis, single node</text>
+<text x="595" y="604" class="s" text-anchor="start">port 6379, private TCP, no TLS</text>
+<polyline points="420,400 420,568" class="arrow" marker-end="url(#head)"/>
+<text x="412" y="462" class="lbl" text-anchor="end">TLS 5432</text>
+<polyline points="470,400 470,568" class="arrow" marker-end="url(#head)"/>
+<text x="478" y="462" class="lbl" text-anchor="start">5432</text>
+<polyline points="640,400 640,568" class="arrow" marker-end="url(#head)"/>
+<text x="648" y="462" class="lbl" text-anchor="start">6379</text>
+</svg>
